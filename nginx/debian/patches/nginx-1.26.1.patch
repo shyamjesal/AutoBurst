@@ -1,0 +1,367 @@
+From: =?utf-8?b?SmFuIE1vasW+w63FoQ==?= <jan.mojzis@gmail.com>
+Date: Mon, 17 Jun 2024 18:40:09 +0200
+Subject: nginx-1.26.1
+Forwarded: not-needed
+
+Backport changes from the nginx 1.26.1 and fix
+CVE-2024-32760, CVE-2024-31079, CVE-2024-35200, CVE-2024-34161
+
+---
+ auto/lib/libatomic/conf                          |  2 +-
+ src/core/ngx_output_chain.c                      | 10 ++++++++--
+ src/event/quic/ngx_event_quic_frames.c           |  1 +
+ src/event/quic/ngx_event_quic_ssl.c              |  5 +++++
+ src/event/quic/ngx_event_quic_transport.c        |  8 ++++++++
+ src/http/modules/ngx_http_grpc_module.c          |  5 ++++-
+ src/http/modules/ngx_http_gunzip_filter_module.c | 18 ++++++++++++++----
+ src/http/modules/ngx_http_gzip_filter_module.c   | 10 +++++++---
+ src/http/modules/ngx_http_ssi_filter_module.c    |  8 ++++++--
+ src/http/modules/ngx_http_sub_filter_module.c    |  8 ++++++--
+ src/http/v3/ngx_http_v3_parse.c                  |  3 +++
+ src/http/v3/ngx_http_v3_request.c                | 20 ++++++++++++++------
+ src/http/v3/ngx_http_v3_table.c                  |  2 +-
+ src/http/v3/ngx_http_v3_uni.c                    |  4 +---
+ src/http/v3/ngx_http_v3_uni.h                    |  2 ++
+ 15 files changed, 81 insertions(+), 25 deletions(-)
+
+diff --git a/auto/lib/libatomic/conf b/auto/lib/libatomic/conf
+index d1e484a..8c8cb43 100644
+--- a/auto/lib/libatomic/conf
++++ b/auto/lib/libatomic/conf
+@@ -19,7 +19,7 @@ else
+                       #include <atomic_ops.h>"
+     ngx_feature_path=
+     ngx_feature_libs="-latomic_ops"
+-    ngx_feature_test="long  n = 0;
++    ngx_feature_test="AO_t  n = 0;
+                       if (!AO_compare_and_swap(&n, 0, 1))
+                           return 1;
+                       if (AO_fetch_and_add(&n, 1) != 1)
+diff --git a/src/core/ngx_output_chain.c b/src/core/ngx_output_chain.c
+index 8570742..a46209c 100644
+--- a/src/core/ngx_output_chain.c
++++ b/src/core/ngx_output_chain.c
+@@ -117,7 +117,10 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
+ 
+                 ngx_debug_point();
+ 
+-                ctx->in = ctx->in->next;
++                cl = ctx->in;
++                ctx->in = cl->next;
++
++                ngx_free_chain(ctx->pool, cl);
+ 
+                 continue;
+             }
+@@ -203,7 +206,10 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
+             /* delete the completed buf from the ctx->in chain */
+ 
+             if (ngx_buf_size(ctx->in->buf) == 0) {
+-                ctx->in = ctx->in->next;
++                cl = ctx->in;
++                ctx->in = cl->next;
++
++                ngx_free_chain(ctx->pool, cl);
+             }
+ 
+             cl = ngx_alloc_chain_link(ctx->pool);
+diff --git a/src/event/quic/ngx_event_quic_frames.c b/src/event/quic/ngx_event_quic_frames.c
+index 42b7d9f..6ea908c 100644
+--- a/src/event/quic/ngx_event_quic_frames.c
++++ b/src/event/quic/ngx_event_quic_frames.c
+@@ -648,6 +648,7 @@ ngx_quic_free_buffer(ngx_connection_t *c, ngx_quic_buffer_t *qb)
+     ngx_quic_free_chain(c, qb->chain);
+ 
+     qb->chain = NULL;
++    qb->last_chain = NULL;
+ }
+ 
+ 
+diff --git a/src/event/quic/ngx_event_quic_ssl.c b/src/event/quic/ngx_event_quic_ssl.c
+index 7872783..ba0b592 100644
+--- a/src/event/quic/ngx_event_quic_ssl.c
++++ b/src/event/quic/ngx_event_quic_ssl.c
+@@ -326,6 +326,11 @@ ngx_quic_handle_crypto_frame(ngx_connection_t *c, ngx_quic_header_t *pkt,
+     ngx_quic_crypto_frame_t  *f;
+ 
+     qc = ngx_quic_get_connection(c);
++
++    if (!ngx_quic_keys_available(qc->keys, pkt->level, 0)) {
++        return NGX_OK;
++    }
++
+     ctx = ngx_quic_get_send_ctx(qc, pkt->level);
+     f = &frame->u.crypto;
+ 
+diff --git a/src/event/quic/ngx_event_quic_transport.c b/src/event/quic/ngx_event_quic_transport.c
+index 19670a6..fba098c 100644
+--- a/src/event/quic/ngx_event_quic_transport.c
++++ b/src/event/quic/ngx_event_quic_transport.c
+@@ -1750,6 +1750,14 @@ ngx_quic_parse_transport_params(u_char *p, u_char *end, ngx_quic_tp_t *tp,
+             return NGX_ERROR;
+         }
+ 
++        if ((size_t) (end - p) < len) {
++            ngx_log_error(NGX_LOG_INFO, log, 0,
++                          "quic failed to parse"
++                          " transport param id:0x%xL, data length %uL too long",
++                          id, len);
++            return NGX_ERROR;
++        }
++
+         rc = ngx_quic_parse_transport_param(p, p + len, id, tp);
+ 
+         if (rc == NGX_ERROR) {
+diff --git a/src/http/modules/ngx_http_grpc_module.c b/src/http/modules/ngx_http_grpc_module.c
+index dfe49c5..e7726f3 100644
+--- a/src/http/modules/ngx_http_grpc_module.c
++++ b/src/http/modules/ngx_http_grpc_module.c
+@@ -1231,7 +1231,7 @@ ngx_http_grpc_body_output_filter(void *data, ngx_chain_t *in)
+     ngx_buf_t              *b;
+     ngx_int_t               rc;
+     ngx_uint_t              next, last;
+-    ngx_chain_t            *cl, *out, **ll;
++    ngx_chain_t            *cl, *out, *ln, **ll;
+     ngx_http_upstream_t    *u;
+     ngx_http_grpc_ctx_t    *ctx;
+     ngx_http_grpc_frame_t  *f;
+@@ -1459,7 +1459,10 @@ ngx_http_grpc_body_output_filter(void *data, ngx_chain_t *in)
+             last = 1;
+         }
+ 
++        ln = in;
+         in = in->next;
++
++        ngx_free_chain(r->pool, ln);
+     }
+ 
+     ctx->in = in;
+diff --git a/src/http/modules/ngx_http_gunzip_filter_module.c b/src/http/modules/ngx_http_gunzip_filter_module.c
+index c1341f5..5d170a1 100644
+--- a/src/http/modules/ngx_http_gunzip_filter_module.c
++++ b/src/http/modules/ngx_http_gunzip_filter_module.c
+@@ -333,6 +333,8 @@ static ngx_int_t
+ ngx_http_gunzip_filter_add_data(ngx_http_request_t *r,
+     ngx_http_gunzip_ctx_t *ctx)
+ {
++    ngx_chain_t  *cl;
++
+     if (ctx->zstream.avail_in || ctx->flush != Z_NO_FLUSH || ctx->redo) {
+         return NGX_OK;
+     }
+@@ -344,8 +346,11 @@ ngx_http_gunzip_filter_add_data(ngx_http_request_t *r,
+         return NGX_DECLINED;
+     }
+ 
+-    ctx->in_buf = ctx->in->buf;
+-    ctx->in = ctx->in->next;
++    cl = ctx->in;
++    ctx->in_buf = cl->buf;
++    ctx->in = cl->next;
++
++    ngx_free_chain(r->pool, cl);
+ 
+     ctx->zstream.next_in = ctx->in_buf->pos;
+     ctx->zstream.avail_in = ctx->in_buf->last - ctx->in_buf->pos;
+@@ -374,6 +379,7 @@ static ngx_int_t
+ ngx_http_gunzip_filter_get_buf(ngx_http_request_t *r,
+     ngx_http_gunzip_ctx_t *ctx)
+ {
++    ngx_chain_t             *cl;
+     ngx_http_gunzip_conf_t  *conf;
+ 
+     if (ctx->zstream.avail_out) {
+@@ -383,8 +389,12 @@ ngx_http_gunzip_filter_get_buf(ngx_http_request_t *r,
+     conf = ngx_http_get_module_loc_conf(r, ngx_http_gunzip_filter_module);
+ 
+     if (ctx->free) {
+-        ctx->out_buf = ctx->free->buf;
+-        ctx->free = ctx->free->next;
++
++        cl = ctx->free;
++        ctx->out_buf = cl->buf;
++        ctx->free = cl->next;
++
++        ngx_free_chain(r->pool, cl);
+ 
+         ctx->out_buf->flush = 0;
+ 
+diff --git a/src/http/modules/ngx_http_gzip_filter_module.c b/src/http/modules/ngx_http_gzip_filter_module.c
+index ed0de60..b555278 100644
+--- a/src/http/modules/ngx_http_gzip_filter_module.c
++++ b/src/http/modules/ngx_http_gzip_filter_module.c
+@@ -985,10 +985,14 @@ static void
+ ngx_http_gzip_filter_free_copy_buf(ngx_http_request_t *r,
+     ngx_http_gzip_ctx_t *ctx)
+ {
+-    ngx_chain_t  *cl;
++    ngx_chain_t  *cl, *ln;
++
++    for (cl = ctx->copied; cl; /* void */) {
++        ln = cl;
++        cl = cl->next;
+ 
+-    for (cl = ctx->copied; cl; cl = cl->next) {
+-        ngx_pfree(r->pool, cl->buf->start);
++        ngx_pfree(r->pool, ln->buf->start);
++        ngx_free_chain(r->pool, ln);
+     }
+ 
+     ctx->copied = NULL;
+diff --git a/src/http/modules/ngx_http_ssi_filter_module.c b/src/http/modules/ngx_http_ssi_filter_module.c
+index 0b84bd3..47068f7 100644
+--- a/src/http/modules/ngx_http_ssi_filter_module.c
++++ b/src/http/modules/ngx_http_ssi_filter_module.c
+@@ -482,9 +482,13 @@ ngx_http_ssi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+     while (ctx->in || ctx->buf) {
+ 
+         if (ctx->buf == NULL) {
+-            ctx->buf = ctx->in->buf;
+-            ctx->in = ctx->in->next;
++
++            cl = ctx->in;
++            ctx->buf = cl->buf;
++            ctx->in = cl->next;
+             ctx->pos = ctx->buf->pos;
++
++            ngx_free_chain(r->pool, cl);
+         }
+ 
+         if (ctx->state == ssi_start_state) {
+diff --git a/src/http/modules/ngx_http_sub_filter_module.c b/src/http/modules/ngx_http_sub_filter_module.c
+index 6d3de59..456bb27 100644
+--- a/src/http/modules/ngx_http_sub_filter_module.c
++++ b/src/http/modules/ngx_http_sub_filter_module.c
+@@ -335,9 +335,13 @@ ngx_http_sub_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+     while (ctx->in || ctx->buf) {
+ 
+         if (ctx->buf == NULL) {
+-            ctx->buf = ctx->in->buf;
+-            ctx->in = ctx->in->next;
++
++            cl = ctx->in;
++            ctx->buf = cl->buf;
++            ctx->in = cl->next;
+             ctx->pos = ctx->buf->pos;
++
++            ngx_free_chain(r->pool, cl);
+         }
+ 
+         if (ctx->buf->flush || ctx->buf->recycled) {
+diff --git a/src/http/v3/ngx_http_v3_parse.c b/src/http/v3/ngx_http_v3_parse.c
+index 5688163..436765c 100644
+--- a/src/http/v3/ngx_http_v3_parse.c
++++ b/src/http/v3/ngx_http_v3_parse.c
+@@ -810,6 +810,7 @@ ngx_http_v3_parse_field_lri(ngx_connection_t *c,
+ 
+             st->literal.length = st->pint.value;
+             if (st->literal.length == 0) {
++                st->value.data = (u_char *) "";
+                 goto done;
+             }
+ 
+@@ -932,6 +933,7 @@ ngx_http_v3_parse_field_l(ngx_connection_t *c,
+ 
+             st->literal.length = st->pint.value;
+             if (st->literal.length == 0) {
++                st->value.data = (u_char *) "";
+                 goto done;
+             }
+ 
+@@ -1072,6 +1074,7 @@ ngx_http_v3_parse_field_lpbi(ngx_connection_t *c,
+ 
+             st->literal.length = st->pint.value;
+             if (st->literal.length == 0) {
++                st->value.data = (u_char *) "";
+                 goto done;
+             }
+ 
+diff --git a/src/http/v3/ngx_http_v3_request.c b/src/http/v3/ngx_http_v3_request.c
+index 87f5f32..0faddd2 100644
+--- a/src/http/v3/ngx_http_v3_request.c
++++ b/src/http/v3/ngx_http_v3_request.c
+@@ -134,7 +134,17 @@ ngx_http_v3_init(ngx_connection_t *c)
+         }
+     }
+ 
+-    return ngx_http_v3_send_settings(c);
++    if (ngx_http_v3_send_settings(c) != NGX_OK) {
++        return NGX_ERROR;
++    }
++
++    if (h3scf->max_table_capacity > 0) {
++        if (ngx_http_v3_get_uni_stream(c, NGX_HTTP_V3_STREAM_DECODER) == NULL) {
++            return NGX_ERROR;
++        }
++    }
++
++    return NGX_OK;
+ }
+ 
+ 
+@@ -398,14 +408,12 @@ ngx_http_v3_wait_request_handler(ngx_event_t *rev)
+ void
+ ngx_http_v3_reset_stream(ngx_connection_t *c)
+ {
+-    ngx_http_v3_session_t   *h3c;
+-    ngx_http_v3_srv_conf_t  *h3scf;
+-
+-    h3scf = ngx_http_v3_get_module_srv_conf(c, ngx_http_v3_module);
++    ngx_http_v3_session_t  *h3c;
+ 
+     h3c = ngx_http_v3_get_session(c);
+ 
+-    if (h3scf->max_table_capacity > 0 && !c->read->eof && !h3c->hq
++    if (!c->read->eof && !h3c->hq
++        && h3c->known_streams[NGX_HTTP_V3_STREAM_SERVER_DECODER]
+         && (c->quic->id & NGX_QUIC_STREAM_UNIDIRECTIONAL) == 0)
+     {
+         (void) ngx_http_v3_send_cancel_stream(c, c->quic->id);
+diff --git a/src/http/v3/ngx_http_v3_table.c b/src/http/v3/ngx_http_v3_table.c
+index f49a8fc..428e732 100644
+--- a/src/http/v3/ngx_http_v3_table.c
++++ b/src/http/v3/ngx_http_v3_table.c
+@@ -308,7 +308,7 @@ ngx_http_v3_set_capacity(ngx_connection_t *c, ngx_uint_t capacity)
+     prev_max = dt->capacity / 32;
+ 
+     if (max > prev_max) {
+-        elts = ngx_alloc(max * sizeof(void *), c->log);
++        elts = ngx_alloc((max + 1) * sizeof(void *), c->log);
+         if (elts == NULL) {
+             return NGX_ERROR;
+         }
+diff --git a/src/http/v3/ngx_http_v3_uni.c b/src/http/v3/ngx_http_v3_uni.c
+index 2fc5b07..302064b 100644
+--- a/src/http/v3/ngx_http_v3_uni.c
++++ b/src/http/v3/ngx_http_v3_uni.c
+@@ -20,8 +20,6 @@ static void ngx_http_v3_close_uni_stream(ngx_connection_t *c);
+ static void ngx_http_v3_uni_read_handler(ngx_event_t *rev);
+ static void ngx_http_v3_uni_dummy_read_handler(ngx_event_t *wev);
+ static void ngx_http_v3_uni_dummy_write_handler(ngx_event_t *wev);
+-static ngx_connection_t *ngx_http_v3_get_uni_stream(ngx_connection_t *c,
+-    ngx_uint_t type);
+ 
+ 
+ void
+@@ -307,7 +305,7 @@ ngx_http_v3_uni_dummy_write_handler(ngx_event_t *wev)
+ }
+ 
+ 
+-static ngx_connection_t *
++ngx_connection_t *
+ ngx_http_v3_get_uni_stream(ngx_connection_t *c, ngx_uint_t type)
+ {
+     u_char                     buf[NGX_HTTP_V3_VARLEN_INT_LEN];
+diff --git a/src/http/v3/ngx_http_v3_uni.h b/src/http/v3/ngx_http_v3_uni.h
+index 911e153..2805894 100644
+--- a/src/http/v3/ngx_http_v3_uni.h
++++ b/src/http/v3/ngx_http_v3_uni.h
+@@ -19,6 +19,8 @@ ngx_int_t ngx_http_v3_register_uni_stream(ngx_connection_t *c, uint64_t type);
+ 
+ ngx_int_t ngx_http_v3_cancel_stream(ngx_connection_t *c, ngx_uint_t stream_id);
+ 
++ngx_connection_t *ngx_http_v3_get_uni_stream(ngx_connection_t *c,
++    ngx_uint_t type);
+ ngx_int_t ngx_http_v3_send_settings(ngx_connection_t *c);
+ ngx_int_t ngx_http_v3_send_goaway(ngx_connection_t *c, uint64_t id);
+ ngx_int_t ngx_http_v3_send_ack_section(ngx_connection_t *c,

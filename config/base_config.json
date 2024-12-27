@@ -1,0 +1,23 @@
+{
+	"workloadType":"WikiMediaUpdated",
+	"urlList":{
+		"BROWSE":"",
+		"LOG_IN":"",
+		"POST_SELF_WALL":""
+	},
+	"systemType":"OPEN",
+	"warmUpTimeInSeconds":6,
+	"wikiConnectorsCount":5,
+	"maxConcurrentUsers":5,
+	"dummyRequestPerConnection":15,
+	"dummyUrl":"",
+	"traceFileReplayAddress":"",
+	"requestResponseTimeFileNameStart":"",
+	"requestResponseTimeFileNameEnd":"__reqResponse.csv",
+	"traceLineResponseTimeFileNameStart":"",
+	"traceLineResponseTimeFileNameEnd":"__tracelineResponse.csv",
+	"maxTriesInSendGet":10,
+	"sleepDurationInRetriesInSeconds":0.1,
+	"hostIP":"",
+	"sleepTimeInSeconds": 5
+}
