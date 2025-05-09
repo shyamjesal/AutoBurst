@@ -1,20 +1,20 @@
 [
-    {
-      "experimentName": "name",
-      "H": 1000,
-      "L": 100,
-      "onDnodes": 10,
-      "burNodes": 8,
-      "meanSLO": 0.1,
-      "P": 1,
-      "D": 2,
-      "throughputfilename": "throughput.csv",
-      "potentialIncreaseFactor": 1.1,
-      "desiredLoad": 0.8,
-      "P_m": 0.01,
-      "D_m": 0.2,
-      "durationRE": 30,
-      "durationLE": 5,
-      "desiredCredit": 60
-    }
-  ]
+  {
+    "experimentName": "test-run",
+    "H": 1000,
+    "L": 100,
+    "onDnodes": 1,
+    "burNodes": 1,
+    "meanSLO": 0.1,
+    "P": 1,
+    "D": 2,
+    "throughputfilename": "throughput.csv",
+    "potentialIncreaseFactor": 1.1,
+    "desiredLoad": 0.8,
+    "P_m": 0.01,
+    "D_m": 0.2,
+    "durationRE": 30,
+    "durationLE": 5,
+    "desiredCredit": 60
+  }
+]

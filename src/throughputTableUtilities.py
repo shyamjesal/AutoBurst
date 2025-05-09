@@ -70,7 +70,7 @@ def fillUpThroughputTable(table, onDlim, burlim):
             table[str(interpolate_val[i][0])] = {}
         table[str(interpolate_val[i][0])][str(interpolate_val[i][1])] = results[i]
 
- '''
+'''
     Determines the number of burstable instances required to achieve a given throughput given the number of regular instances.
 
     Parameters:
@@ -83,7 +83,7 @@ def fillUpThroughputTable(table, onDlim, burlim):
     Returns:
     - int: The optimal number of burstable instances (`b`) to achieve the desired throughput.
            If no suitable number is found, the maximum possible value from the table is returned.
-    '''
+'''
 def findNumberOfBurstable(table, onD, throughput, min):
     burstable = table[str(onD)]
     currentthroughput = math.inf

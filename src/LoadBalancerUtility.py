@@ -8,6 +8,35 @@ from shutil import copyfile
 prevReqs = 0
 prevIpWeight = []
 
+def getNumberOfReqs(Var):
+    """
+    Get the number of requests processed by the NGINX load balancer.
+
+    Args:
+        Var: Variables module containing configuration values
+
+    Returns:
+        int: The total number of requests processed by the load balancer
+    """
+    global prevReqs
+
+    # Command to get request stats from NGINX status page
+    commandString = 'curl -s http://localhost/nginx_status | awk \'NR==3 {print $3}\''
+
+    # Execute command on the load balancer instance
+    result = InstanceUtility.executeCommandInInstance(
+        instanceID=Var.LB_INSTANCE_ID,
+        commandString=commandString
+    )
+
+    try:
+        # Parse the result to get the number of requests
+        currReqs = int(result.strip())
+        return currReqs
+    except (ValueError, AttributeError):
+        # If there was an error parsing the result, return the previous count
+        print("Error getting request count from load balancer")
+        return prevReqs
 
 def createTempLocalWikiConfig(Var):
     copyfile(src=Var.wikiConfigSource, dst=Var.wikiConfigTemp)
@@ -37,7 +66,7 @@ def sendUpdatedNginxConf(Var):
     return
 
 def reloadNginxLB(Var):
-    commandString = 'sudo service nginx reload'
+    commandString = 'sudo /usr/local/nginx/nginx -s reload'
     InstanceUtility.executeCommandInInstance(instanceID=Var.LB_INSTANCE_ID, commandString=commandString)
     return
 
@@ -50,7 +79,7 @@ def setupIntialNginxConf(wikiCreationInfo, Var):
     createTempLocalWikiConfig(Var=Var)
     initializeNginxConf(serverIpList=wikiIps, Var=Var)
     sendUpdatedNginxConf(Var=Var)
-    commandString = 'sudo service nginx restart'
+    commandString = 'sudo /usr/local/nginx/nginx'
     InstanceUtility.executeCommandInInstance(instanceID=Var.LB_INSTANCE_ID, commandString=commandString)
     reloadNginxLB(Var)
     return

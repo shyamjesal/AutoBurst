@@ -1,4 +1,7 @@
 import throughputTableUtilities as tTableUtilities
+import datetime
+import InstanceUtility
+import math
 
 class AutoBurstPolicies():
     def __init__(self, H, L, onDnodes, burNodes, meanSLO, P, D, throughputfilename, potentialIncreaseFactor, desiredLoad, P_m, D_m, desiredCredit):
@@ -80,7 +83,7 @@ class AutoBurstPolicies():
     Returns:
         - desiredCredit (int): 
     """
-    def getExpectedCredit(desiredThroughput):
+    def getExpectedCredit(self,desiredThroughput):
         return self.desiredCredit
     """
     Estimates the adjustments needed for on-demand and burstable resources to optimize throughput 
@@ -115,7 +118,7 @@ class AutoBurstPolicies():
         currentTime = datetime.datetime.now()
         timeSpent = (currentTime - self.initialStartTime).total_seconds() / 60
 
-        getExpectedCredit(desiredThroughput)
+        expectedCredit = self.getExpectedCredit(desiredThroughput)
      
         diff = expectedCredit - creditTotal
         self.difflist.append(diff)

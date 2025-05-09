@@ -3,6 +3,7 @@ import json
 import subprocess
 import time
 import re
+import Variables as Var
 
 
 def findInstanceByInstanceID(instanceID):
@@ -16,16 +17,18 @@ def findInstanceByInstanceID(instanceID):
     if (len(info) > 1):
         print("Error in finsInstanceByName: more than 1 instances match the name")
         return -1
-    return info[0][0]
+    return info
 
 def executeCommandInInstance(instanceID, commandString):
     instance = findInstanceByInstanceID(instanceID)
+    if instance == -1:
+        raise ValueError(f"No instance found with ID {instanceID}")
     remoteServer = 'ubuntu@' + instance["PrivateIPs"]
     cmd = ['ssh', '-i', Var.key, remoteServer, commandString]
     info = subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
     return
 
-''' get metric from AWS cloudwatch 
+''' get metric from AWS cloudwatch
     metricName can be: CPUCreditUsage, CPUCreditBalance, CPUSurplusCreditBalance, CPUSurplusCreditsCharged, CPUUtilization
     stat can be: Minimum, Maximum, Sum, Average, SampleCount, pNN.NN
     returns a tuple (stat, timestamp)'''
@@ -60,6 +63,8 @@ def stopInstanceNonBlocking(instanceInfo):
 def block(instanceInfo, state):
     instanceID = instanceInfo["InstanceId"]
     a = findInstanceByInstanceID(instanceID)
+    if a == -1:
+        raise ValueError(f"No instance found with ID {instanceID}")
     while(a["Status"]["Name"] != state):
         time.sleep(1)
         a = findInstanceByInstanceID(instanceID)
@@ -98,6 +103,8 @@ def createInstanceFromImage(imageCreationInfo):
     cmd.extend(['--placement', placement])
     cmdString = " ".join(cmd)
     instnaceInfo = subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
+    # print the command string
+    print(cmdString)
     instnaceInfo = json.loads(instnaceInfo)
     return instnaceInfo
 
@@ -106,6 +113,8 @@ def createInstanceFromImage(imageCreationInfo):
 '''Calculates credit from latest CPUutilization value(s). Applicable for cases when CPUutil is reported at 1 min interval but credit balance at 5 min interval'''
 def getCredit(instanceID, stat):
     instance = findInstanceByInstanceID(instanceID)
+    if instance == -1:
+        raise ValueError(f"No instance found with ID {instanceID}")
     instanceType = instance["Type"]
     vcpu = Var.burstable_vcpu_baseline[instanceType][0]
     baseline = Var.burstable_vcpu_baseline[instanceType][1]

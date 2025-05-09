@@ -1,14 +1,24 @@
-import threading
-from threading import Lock
+# from threading import Thread
+from threading import Lock,Thread
 import utilities
 import Variables as Var
-
+import Node as Node
+import NodeStarter as NodeStarter
+import ClientAppUtility as ClientAppUtility
+import LoadBalancerUtility as LoadBalancerUtility
+import InstanceUtility as InstanceUtility
+import WikiAppUtility as WikiAppUtility
+import autoBurst as autoBurst
+import time
 import argparse
+import datetime
 
 # `curr_onD`: Tracks currently running on-demand instances
 curr_onD = []
+onD = []
 # `curr_bur`: Tracks currently running burstable instances
 curr_bur = []
+bur = []
 # `stopped_instances_pending`: Tracks burstable instances pending termination and uses this information to use up their credits
 stopped_instances_pending = []
 # `stopped_instances`: Tracks instances pending termination
@@ -107,7 +117,7 @@ def setupInitialNodes(Var=Var):
     time.sleep(Var.sleepAfterNodeStartInSeconds)
 
     lbInfo = InstanceUtility.findInstanceByInstanceID(Var.LB_INSTANCE_ID)
-    
+
     dbInfo = {}
     dbIP = {}
     for i in range(0, Var.DBcount):
@@ -119,17 +129,17 @@ def setupInitialNodes(Var=Var):
     
     
     LoadBalancerUtility.setupIntialNginxConf(wikiCreationInfo=wikiCreationInfo, Var=Var)
-    
+
     initialNodeInfo = {}
 
     initialNodeInfo["dbStartInfo"] = dbStartInfo
     initialNodeInfo["wikiCreationInfo"] = wikiCreationInfo
     initialNodeInfo["clientStartInfo"] = clientStartInfo
     initialNodeInfo["loadBalancerInfo"] = loadBalancerInfo
-    initialNodeInfo["IPinfo"] = IPinfo
+    # initialNodeInfo["IPinfo"] = IPinfo
 
     return initialNodeInfo
-    
+
 
 def runExperiments(configFilePath):
 
@@ -145,8 +155,8 @@ def runExperiments(configFilePath):
 
     # Start instances and initialize everything including curr_onD and curr_bur lists
 
-    autoburst = autoBurst.AutoBurstPolicies(config["H"], config["M"], config["L"], config["onDnodes"], config["burNodes"], config["meanSLO"], config["P"], config["D"], config["throughputfilename"], config["potentialIncreaseFactor"], config["desiredLoad"], config["P_m"], config["D_m"], config["desiredCredit"])
-    
+    autoburst = autoBurst.AutoBurstPolicies(config["H"], config["L"], config["onDnodes"], config["burNodes"], config["meanSLO"], config["P"], config["D"], config["throughputfilename"], config["potentialIncreaseFactor"], config["desiredLoad"], config["P_m"], config["D_m"], config["desiredCredit"])
+
     onD_init_count = config["onDnodes"]
     bur_init_count = config["burNodes"]
     setStartUpNodes(lock, onD_init_count, bur_init_count)
@@ -229,15 +239,15 @@ def runExperiments(configFilePath):
         endTimeForArrRate = time.time()
         duration = endTimeForArrRate - startTimeForArrRate
         # Write code to get number of requests from the LoadBalancer
-        # currReqs = LoadBalancerUtility.getNumberOfReqs(Var)
+        currReqs = LoadBalancerUtility.getNumberOfReqs(Var)
         reqs = currReqs - prevReqs - 1  # removing the extra reqs by curl in this duration
         arrRate = reqs / duration
         prevReqs = currReqs
         startTimeForArrRate = time.time()
 
-        od, b = autoburst.resource_estimator(arrRate, resBur=curr_resBur, bur=curr_bur,
+        od, b = autoburst.resource_estimator(arrRate, bur=curr_bur,
                                                            stop_pending=stopped_instances_pending, onD=len(curr_onD), unused_onD = len(onD))
-                
+
         # Write code to start extra onD instances and to stop extra onD instances
         if (od > len(curr_onD)):
             # start extra nodes. update curr_od
@@ -322,14 +332,14 @@ def runExperiments(configFilePath):
                 while len(curr_bur) > b and len(curr_bur) > 0:
                     instanceToDrain = curr_bur.pop(0)
                     stopped_instances_pending.append(instanceToDrain)
-   
+
         loopTimeEnd = time.time()
         loopDur = loopTimeEnd-loopTimeStart
         if loopDur < config["durationRE"]:
             time.sleep(config["durationRE"]-loopDur)
         while (shortTermThreadRunning):
             time.sleep(1)
-    
+
     # Write code to stop/terminate all instances
     InstanceUtility.stopAllRunningInstances(instanceInfo=nodeInfo)
     InstanceUtility.deleteInstances(instanceInfos=nodeInfo["wikiCreationInfo"])
@@ -351,7 +361,7 @@ def runExperiments(configFilePath):
 
 def main():
     my_parser = argparse.ArgumentParser(allow_abbrev=False, description='Run AutoBurst with config file path')
-    
+
     my_parser.add_argument("--configFile", action='store', type=str, required=True, metavar='Required: path of the config file')
 
     args = my_parser.parse_args()
