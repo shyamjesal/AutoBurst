@@ -4,9 +4,52 @@ import Variables as Var
 from nginxParser import load, dump
 import InstanceUtility as InstanceUtility
 from shutil import copyfile
+import time
+import logging
+logger = logging.getLogger(__name__)
 
 prevReqs = 0
 prevIpWeight = []
+
+
+def getArrivalRate(Var, duration=1):
+    """
+    Get the arrival rate of requests to the NGINX load balancer.
+
+    Args:
+        Var: Variables module containing configuration values
+        duration (int): Duration in seconds for which to calculate the arrival rate
+
+    Returns:
+        float: The arrival rate of requests per second
+    """
+    global prevReqs
+
+    # Get the current number of requests processed by the load balancer
+    currReqs = getNumberOfReqs(Var)
+
+    if currReqs == 0:
+        print("No requests processed by load balancer")
+        return 0
+    # If this is the first call, set the previous request count to the current count
+    if prevReqs == 0:
+        prevReqs = currReqs
+    
+    time.sleep(duration)
+    # Get the current number of requests again
+    currReqs = getNumberOfReqs(Var)
+    if currReqs == 0:
+        print("No requests processed by load balancer")
+        return 0
+
+    # Calculate the arrival rate
+    arrivalRate = (currReqs - prevReqs) / duration
+
+    # Update the previous request count
+    prevReqs = currReqs
+
+    return arrivalRate
+
 
 def getNumberOfReqs(Var):
     """
@@ -32,6 +75,7 @@ def getNumberOfReqs(Var):
     try:
         # Parse the result to get the number of requests
         currReqs = int(result.strip())
+        logger.info(f"Current requests: {currReqs}")
         return currReqs
     except (ValueError, AttributeError):
         # If there was an error parsing the result, return the previous count
@@ -79,7 +123,7 @@ def setupIntialNginxConf(wikiCreationInfo, Var):
     createTempLocalWikiConfig(Var=Var)
     initializeNginxConf(serverIpList=wikiIps, Var=Var)
     sendUpdatedNginxConf(Var=Var)
-    commandString = 'sudo /usr/local/nginx/nginx'
+    commandString = 'sudo rm /var/log/nginx/wikiLog_access_test.log ; sudo /usr/local/nginx/nginx'
     InstanceUtility.executeCommandInInstance(instanceID=Var.LB_INSTANCE_ID, commandString=commandString)
     reloadNginxLB(Var)
     return

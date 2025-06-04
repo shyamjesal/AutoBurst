@@ -2,6 +2,8 @@ import throughputTableUtilities as tTableUtilities
 import datetime
 import InstanceUtility
 import math
+import logging
+logger = logging.getLogger(__name__)
 
 class AutoBurstPolicies():
     def __init__(self, H, L, onDnodes, burNodes, meanSLO, P, D, throughputfilename, potentialIncreaseFactor, desiredLoad, P_m, D_m, desiredCredit):
@@ -16,7 +18,7 @@ class AutoBurstPolicies():
         self.D_m = D_m
         self.error = []
         self.errorSum = 0
-        self.lweight = 0
+        self.lweight = 0.0
         self.potentialIncreaseFactor = potentialIncreaseFactor
         self.desiredLoad = desiredLoad
         table, onDlim, burlim = tTableUtilities.readTable(throughputfilename)
@@ -31,7 +33,7 @@ class AutoBurstPolicies():
 
 
     def init_weight(self, onD, bur, weight):
-        self.lweight = max(min(math.log10(weight), math.log10(self.H)), math.log10(self.L))
+        self.lweight = max(min(math.log10(float(weight)), math.log10(float(self.H))), math.log10(float(self.L)))
 
         for instance in onD:
             instance.weight = self.H
@@ -60,17 +62,17 @@ class AutoBurstPolicies():
             cred = InstanceUtility.getCredit(instance.info["InstanceId"], "Average")[0]
             instance.creditBalance = cred
             totalburCredit += cred
-            print("Instance credit = ", instance.creditBalance)
+            logger.debug("Instance credit = ", instance.creditBalance)
 
         for instance in stop_pending:
             cred = InstanceUtility.getCredit(instance.info["InstanceId"], "Average")[0]
             instance.creditBalance = cred
             totalburCredit += cred
-            print("Instance credit = ", instance.creditBalance)
+            logger.debug("Instance credit = ", instance.creditBalance)
 
         totalresburCredit = 0
 
-        print("Total credit of burstables = ", totalburCredit, " and reserved burstable = ", totalresburCredit)
+        logger.info(f"Total credit of burstables = {totalburCredit} and reserved burstable = {totalresburCredit}")
         return totalresburCredit, totalburCredit
 
 
@@ -107,13 +109,11 @@ class AutoBurstPolicies():
 
     def resource_estimator(self, arrRate, bur, stop_pending, onD, unused_onD):
         
-
         desiredThroughput = arrRate * self.potentialIncreaseFactor / self.desiredLoad
         resBurcredit, burcredit = self.getCreditTotal(bur, stop_pending)
         creditTotal = resBurcredit + burcredit
         
         self.creditTotal.append(creditTotal)
-
     
         currentTime = datetime.datetime.now()
         timeSpent = (currentTime - self.initialStartTime).total_seconds() / 60
@@ -180,9 +180,10 @@ class AutoBurstPolicies():
     def latency_optimizer(self, bur, latency, bur_stop_pending):
         if len(latency) == 0:
             return
-        latencyVal = int(latency[0]) / 1000000000
+        latencyVal = float(latency)
 
         currentError = latencyVal - self.meanSLO
+        logger.info("Current error: %s; Current latency: %s", currentError, latencyVal)
         self.error.append(currentError)
         if len(self.error) > 3:
             self.error.pop(0)
@@ -191,9 +192,11 @@ class AutoBurstPolicies():
             out = self.P * self.error[-1]
         else:
             out = (self.P * self.error[-1]) + (self.D * (self.error[-1] - self.error[-2]))
-
-        self.lweight = max(min(self.lweight + out, math.log10(self.H)), math.log10(self.L))
         
+        logger.info("Old lweight: %s, out: %s", self.lweight, out)
+
+        self.lweight = max(min(self.lweight + out, math.log10(float(self.H))), math.log10(float(self.L)))
+        logger.info("New lweight: %s", self.lweight)
 
         minCredit = bur[0].creditBalance
         for instance in bur:

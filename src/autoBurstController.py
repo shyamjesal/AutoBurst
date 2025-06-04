@@ -12,6 +12,9 @@ import autoBurst as autoBurst
 import time
 import argparse
 import datetime
+import logging
+import subprocess
+logger = logging.getLogger(__name__)
 
 # `curr_onD`: Tracks currently running on-demand instances
 curr_onD = []
@@ -44,7 +47,8 @@ def shortTermDecision(lock, autoburst, onD, bur, pending_stop, Var, expectedDura
     while clientRunning:
         startTime = time.time()
         ## Collect latency stats in the format: latency (list): A list containing the latency measurements (in nanoseconds). Only the first value is used.
-        latency = ClientAppUtility.getLatencyStats(Var)
+        latency = ClientAppUtility.getLatencyStatsK6Cloud(Var)
+        logger.info(f"Latency stats: {latency}")
         with lock:
             autoburst.latency_optimizer(bur, latency, pending_stop)
             # Update load balancer with the updated weights from latency_optimizer
@@ -85,10 +89,16 @@ def setStartUpNodes(lock, init_od=1, init_bur=1):
             curr_bur.append(bur.pop(0))
 
     # stop the running instances in onD and bur
+    stopped_instances_list = []
     for instance in onD:
         InstanceUtility.stopInstanceNonBlocking(instance.info)
+        stopped_instances_list.append(instance)
     for instance in bur:
         InstanceUtility.stopInstanceNonBlocking(instance.info)
+        stopped_instances_list.append(instance)
+    # block until all instances stopped
+    for instance in stopped_instances_list:
+        InstanceUtility.block(instance.info, 'stopped')
 
 def setupInitialNodes(Var=Var):
     # start the load balancer
@@ -124,7 +134,7 @@ def setupInitialNodes(Var=Var):
         dbInfo[i] = InstanceUtility.findInstanceByInstanceID(dbBaseInfo[i]["InstanceId"])
         dbIP[i] = dbInfo[i]["PrivateIPs"]  # convert to private
 
-    dbAttachTracker = WikiAppUtility.updateLocalSettingsAll(dbIP=dbIP, dbCount=Var.DBcount, allWikiNodeInfo=wikiCreationInfo,
+    dbAttachTracker = WikiAppUtility.startHelloAll(dbIP=dbIP, dbCount=Var.DBcount, allWikiNodeInfo=wikiCreationInfo,
                                                             loadBalancerIP=lbInfo["PrivateIPs"], cacheIP=["127.0.0.1:11211"], cacheCount= 0)
     
     
@@ -172,10 +182,10 @@ def runExperiments(configFilePath):
     # startClient in separate thread
     Thread(target=runClient, args=(config, Var)).start()
 
-    startTimeForArrRate = ClientAppUtility.waitForWarmUp(Var)
+    # startTimeForArrRate = ClientAppUtility.waitForWarmUp(Var)
+    startTimeForArrRate = time.time()
     prevReqs = LoadBalancerUtility.getNumberOfReqs(Var)
-    arrRate = config["arrRate"]
-
+    # arrRate = LoadBalancerUtility.getArrivalRate(Var, duration=1)
     # start shortTermDecision in a separate thread
     Thread(target=shortTermDecision, args=(lock, autoburst, curr_onD, curr_bur, stopped_instances_pending, Var, config["durationLE"])).start()
 
@@ -245,8 +255,10 @@ def runExperiments(configFilePath):
         prevReqs = currReqs
         startTimeForArrRate = time.time()
 
+        logger.info(f"Current OnD instances: {len(curr_onD)}, Current Burstable instances: {len(curr_bur)}, Stopped instances pending: {len(stopped_instances_pending)}")
         od, b = autoburst.resource_estimator(arrRate, bur=curr_bur,
                                                            stop_pending=stopped_instances_pending, onD=len(curr_onD), unused_onD = len(onD))
+        logger.info(f"Estimated OnD instances: {od}, Estimated Burstable instances: {b}")
 
         # Write code to start extra onD instances and to stop extra onD instances
         if (od > len(curr_onD)):
@@ -337,8 +349,10 @@ def runExperiments(configFilePath):
         loopDur = loopTimeEnd-loopTimeStart
         if loopDur < config["durationRE"]:
             time.sleep(config["durationRE"]-loopDur)
-        while (shortTermThreadRunning):
-            time.sleep(1)
+            logger.info(f"Sleeping for {config['durationRE'] - loopDur} seconds to maintain the loop duration.")
+            
+    while (shortTermThreadRunning):
+        time.sleep(1)
 
     # Write code to stop/terminate all instances
     InstanceUtility.stopAllRunningInstances(instanceInfo=nodeInfo)
@@ -359,7 +373,13 @@ def runExperiments(configFilePath):
                 temp[1] = (datetime.datetime.now())
                 ondCost[k].append(temp)
 
+    # Write code to write the cost to a file
+    utilities.writeCostToFile(burCost, ondCost)
+
 def main():
+    logging.basicConfig(level=logging.INFO)
+    # remove rm /home/ubuntu/.ssh/known_hosts
+    subprocess.run(['rm', '/home/ubuntu/.ssh/known_hosts'])
     my_parser = argparse.ArgumentParser(allow_abbrev=False, description='Run AutoBurst with config file path')
 
     my_parser.add_argument("--configFile", action='store', type=str, required=True, metavar='Required: path of the config file')

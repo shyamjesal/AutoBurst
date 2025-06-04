@@ -43,7 +43,7 @@ def changeMemcacheDIpInLocalSettings(memcachedIP):
 
 def sendFilesToWikiVm(wikiVmInfo, remoteFilepath, filename):
     wikiVmInfoRetrieved = InstanceUtility.findInstanceByInstanceID(wikiVmInfo["InstanceId"])
-    print(wikiVmInfoRetrieved)
+    # print(wikiVmInfoRetrieved)
     remotePath = 'ubuntu@' + wikiVmInfoRetrieved["PrivateIPs"] + ':' + remoteFilepath
 
     cmd = ['scp', '-i', Var.key, filename, remotePath]
@@ -71,4 +71,25 @@ def updateLocalSettingsAll(dbIP, dbCount, allWikiNodeInfo, loadBalancerIP, cache
         sendFilesToWikiVm(wikiVmInfo=wikiNodeInfo, remoteFilepath=Var.localSettingsDestination,
                           filename=Var.localSettingsTemp)
         InstanceUtility.executeCommandInInstance(instanceID=wikiNodeId, commandString='sudo service apache2 restart')
+    return
+
+def startHelloAll(dbIP, dbCount, allWikiNodeInfo, loadBalancerIP, cacheIP, cacheCount):
+    # i = 0
+    for wikiNodeInfo in allWikiNodeInfo["Instances"]:
+        wikiNodeId = wikiNodeInfo["InstanceId"]
+        # createTemp(Var.localSettingsSource, Var.localSettingsTemp)
+
+        # setDbIpInLocalSettings(dbIP=dbIP[i % dbCount])
+        # changeServerIpInLocalSettings(serverIP=loadBalancerIP)
+
+        # if cacheCount == 0:
+        #     changeMemcacheDIpInLocalSettings(memcachedIP=cacheIP[0])
+        # else:
+        #     changeMemcacheDIpInLocalSettings(memcachedIP=cacheIP[i % cacheCount])
+
+        # i = i + 1
+
+        # sendFilesToWikiVm(wikiVmInfo=wikiNodeInfo, remoteFilepath=Var.localSettingsDestination,
+        #                   filename=Var.localSettingsTemp)
+        InstanceUtility.executeCommandInInstance(instanceID=wikiNodeId, commandString='sudo service server restart')
     return

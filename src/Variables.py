@@ -22,15 +22,16 @@ WIKI_securityGroup = "launch-wizard-18"
 # WIKI_placement = "{\"GroupId\": \"pg-06ba00dcbf1293ac7\"}"
 WIKI_placement = "{}"
 WIKI_monitoring = "Enabled=true"
-wikiPort = 80
+wikiPort = 5000
 startWikiIndex = 1
 localSettingsDestination = "/var/www/html/LocalSettings.php"
 
 
-WIKI_OND_IMAGE_ID = "ami-054c232b54f3bf58d"
+# WIKI_OND_IMAGE_ID = "ami-054c232b54f3bf58d"
+WIKI_OND_IMAGE_ID = "ami-07e82162763b0f119"
 WIKI_OND_VM_TYPE = "m5.large"
 
-WIKI_BUR_IMAGE_ID =  "ami-054c232b54f3bf58d"
+WIKI_BUR_IMAGE_ID =  "ami-07e82162763b0f119"
 WIKI_BUR_VM_TYPE = "t3.large"
 
 # { instanceType : (vcpu, baseline)}
@@ -70,7 +71,7 @@ tempClientConfig = "config/base_config_temp.json"
 finalClientConfig = "/path/config.json"
 resultStorageDirectory = "/home/ubuntu/results"
 clientStatusCheckIntervalInSeconds = 2.0
-fixedWikiNodesCountOnD = 5
-fixedWikiNodesCountBur = 5
+fixedWikiNodesCountOnD = 15
+fixedWikiNodesCountBur = 15
 sleepAfterNodeStartInSeconds=120
 sleepAfterUpdatingNginxConfInSeconds=60

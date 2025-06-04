@@ -20,8 +20,8 @@ def waitForWarmUp(Var):
     return t2
 
 def startClient(config, Var):
-    sendUpdatedPropertiesFileToClient(config, Var)
-    runTraceReplayer(Var)
+    # sendUpdatedPropertiesFileToClient(config, Var)
+    runTraceReplayerBlocking(Var)
     return
 
 def sendUpdatedPropertiesFileToClient(config, Var):
@@ -78,24 +78,56 @@ def createTempPropertiesFile(config, Var):
 
 
 def runTraceReplayerBlocking(Var):
+
+    # Kill any existing k6 processes
+    killCommand = ['ssh', '-i', Var.key, 'ubuntu@' + Var.clientPrivateIP, 'pkill -f k6']
+    subprocess.call(killCommand)
+
+    # remove old results file
+    removeCommand = ['ssh', '-i', Var.key, 'ubuntu@' + Var.clientPrivateIP, 'rm -f /home/ubuntu/load_results.json']
+    subprocess.call(removeCommand)
+
     cmd = ['ssh','-i',Var.key]
     cmd.extend(['ubuntu' + '@' + Var.clientPrivateIP])
-    cmd.extend(['java'])
-    cmd.extend([Var.maxClientMemory])
-    cmd.extend(['-jar', Var.clientJarAddress])
-    cmd.extend([Var.finalClientConfig])
-    cmd.extend([Var.durationOfLatencyTrackingInClient])
+    cmd.extend(['/home/ubuntu/k6'])
+    cmd.extend(['cloud' ,'run', '--local-execution'])
+    client_string = 'MY_CLIENT="http://' + Var.loadBalancerPrivateIP +'"'
+    cmd.extend(['--env', client_string])
+    # cmd.extend(['--out', 'json=/home/ubuntu/load_results.json'])
+    cmd.extend(['/home/ubuntu/load.js', "--quiet"])
 
     cmdString = ' '.join(cmd)
 
     subprocess.call(cmd)
+    time.sleep(15)
     return
 
 
 def getLatencyStats(Var):
-    commandString = 'cat /home/ubuntu/stat.csv'
+    commandString = 'tail -n 200 /home/ubuntu/load_results.json | jq -s \' [ .[] | select(.type == "Point" and .metric == "http_req_duration" and (.data.tags.status | tonumber) >= 200) ] \
+        | map(.data.value) \
+        | sort \
+        | if length > 0 then \
+            (length - 1) as $len | \
+            (0.95 * $len | floor) as $index | \
+            .[$index] \
+            else \
+            "Insufficient data" | halt_error(1) \
+            end \
+        \''
     remoteServer = 'ubuntu@' + Var.clientPrivateIP
     cmd = ['ssh', '-i', Var.key, remoteServer, commandString]
 
     info = subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
     return info.split()
+
+def getLatencyStatsK6Cloud(Var):
+    commandString = ['bash', './k6get.sh' ,"|", "jq", '".[1]"']
+    # remoteServer = 'ubuntu@' + Var.clientPrivateIP
+    # cmd = ['ssh', '-i', Var.key, remoteServer, commandString]
+
+    info = subprocess.run(commandString, stdout=subprocess.PIPE).stdout.decode('utf-8')
+    while info == 'null\n':
+        info = subprocess.run(commandString, stdout=subprocess.PIPE).stdout.decode('utf-8')
+        
+    return info.strip()

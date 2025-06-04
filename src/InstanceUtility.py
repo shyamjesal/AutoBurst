@@ -4,6 +4,9 @@ import subprocess
 import time
 import re
 import Variables as Var
+import boto3
+import logging
+logger = logging.getLogger(__name__)
 
 
 def findInstanceByInstanceID(instanceID):
@@ -17,7 +20,7 @@ def findInstanceByInstanceID(instanceID):
     if (len(info) > 1):
         print("Error in finsInstanceByName: more than 1 instances match the name")
         return -1
-    return info
+    return info[0][0]
 
 def executeCommandInInstance(instanceID, commandString):
     instance = findInstanceByInstanceID(instanceID)
@@ -26,7 +29,7 @@ def executeCommandInInstance(instanceID, commandString):
     remoteServer = 'ubuntu@' + instance["PrivateIPs"]
     cmd = ['ssh', '-i', Var.key, remoteServer, commandString]
     info = subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
-    return
+    return info
 
 ''' get metric from AWS cloudwatch
     metricName can be: CPUCreditUsage, CPUCreditBalance, CPUSurplusCreditBalance, CPUSurplusCreditsCharged, CPUUtilization
@@ -51,11 +54,52 @@ def getMetricStats(instanceID, stat, metricName):
         return (info["Datapoints"][idx][stat], info["Datapoints"][idx]["Timestamp"])
     return (-1, -1)
 
+def getMetricStatsMultiple(instanceID: str, stat: str, metricName: str, startTime: datetime.datetime) -> tuple:
+        """
+        Get multiple metric statistics from CloudWatch for a given instance and metric.
+        
+        Args:
+            instanceID (str): The EC2 instance ID
+            stat (str): The statistic to retrieve (e.g., 'Average', 'Maximum', 'Minimum')
+            metricName (str): The name of the metric to retrieve
+            startTime (datetime): The start time for the metric data points
+        
+        Returns:
+            tuple: A tuple containing:
+                - list: The metric values
+                - list: The timestamps for each value
+        """
+        cloudwatch = boto3.client('cloudwatch', region_name='us-west-2')
+        
+        # Get metrics from startTime to now
+        endTime = datetime.datetime.now()
+        
+        response = cloudwatch.get_metric_statistics(
+            Namespace='AWS/EC2',
+            MetricName=metricName,
+            Dimensions=[{'Name': 'InstanceId', 'Value': instanceID}],
+            StartTime=startTime,
+            EndTime=endTime,
+            Period=60,  # 1-minute intervals
+            Statistics=[stat]
+        )
+        
+        # Sort datapoints by timestamp
+        datapoints = response['Datapoints']
+        datapoints.sort(key=lambda x: x['Timestamp'])
+        
+        # Extract values and timestamps
+        values = [point[stat] for point in datapoints]
+        timestamps = [point['Timestamp'].strftime('%Y-%m-%dT%H:%M:%S%z') for point in datapoints]
+        
+        return values, timestamps
+
 ''' Stop instances and return immediately
     Non Blocking function to stop instance based on InstanceID in instanceInfo in AWS'''
 def stopInstanceNonBlocking(instanceInfo):
     instanceID = instanceInfo["InstanceId"]
     cmd = ['aws', 'ec2', 'stop-instances', '--instance-ids', instanceID]
+    logger.info(f"Stopping instance {instanceID} non-blocking")
     subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
     return
 
@@ -65,6 +109,7 @@ def block(instanceInfo, state):
     a = findInstanceByInstanceID(instanceID)
     if a == -1:
         raise ValueError(f"No instance found with ID {instanceID}")
+    logger.info(f"Waiting for instance {instanceID} to reach state {state}")
     while(a["Status"]["Name"] != state):
         time.sleep(1)
         a = findInstanceByInstanceID(instanceID)
@@ -104,7 +149,7 @@ def createInstanceFromImage(imageCreationInfo):
     cmdString = " ".join(cmd)
     instnaceInfo = subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
     # print the command string
-    print(cmdString)
+    logger.info(f"Running {count} {type} instances")
     instnaceInfo = json.loads(instnaceInfo)
     return instnaceInfo
 
@@ -155,9 +200,15 @@ def getCredit(instanceID, stat):
 
     return (curr_credit, curr_ts)
 
-def stopAllRunningInstances(instanceInfo):
+def stopAllRunningInstances(instanceInfo,dontStopClient=True):
     stopLoadBalancerServer(instanceInfo["loadBalancerInfo"])
-    stopClientServer(instanceInfo["clientStartInfo"])
+    if dontStopClient:
+        logger.info("Skipping client server stop as dontStopClient is True")
+    else:
+        # logger.info("Stopping client server")
+        stopClientServer(instanceInfo["clientStartInfo"])
+        
+    # stopClientServer(instanceInfo["clientStartInfo"])
     stopDbServer(instanceInfo["dbStartInfo"])
     return
 
@@ -186,6 +237,7 @@ def stopInstanceNonBlocking(instanceInfo):
 
 def deleteInstances(instanceInfos):
     # Specific to wiki creation return type's structure from the function NodeStarter.createWikiNode
+    logger.info("Deleting instances")
     for x in instanceInfos["Instances"]:
         instanceID = x["InstanceId"]
         cmd = ['aws', 'ec2', 'terminate-instances', '--instance-ids', instanceID]
